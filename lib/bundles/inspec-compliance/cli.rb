@@ -36,6 +36,7 @@ module Compliance
 
       options['server'] = server
       url = options['server'] + options['apipath']
+
       if !options['user'].nil? && !options['password'].nil?
         # username / password
         _success, msg = login_username_password(url, options['user'], options['password'], options['insecure'])
@@ -49,7 +50,27 @@ module Compliance
       elsif !options['refresh_token'].nil?
         _success, msg = login_refreshtoken(url, options)
       else
-        puts 'Please run `inspec compliance login SERVER` with options --token or --refresh_token, --user, and --insecure or --not-insecure'
+        puts 'Please run `` with options --token or --refresh_token, --user, and --insecure or --not-insecure'
+        exit 1
+      end
+
+      puts '', msg
+    end
+
+    desc "automate SERVER --user='USER' --token='TOKEN' --ent='ENT'", 'Log in to an Automate SERVER'
+    option :token, type: :string,
+      desc: 'Chef Compliance access token'
+    option :user, type: :string,
+      desc: 'Chef Compliance Username'
+    option :ent, type: :string,
+      desc: 'Enterprise for Chef Automate reporting'
+    def automate(server)
+      options['server'] = server
+      url = options['server'] + '/compliance/profiles'
+      if url && options['user'] && options['token'] && options['ent']
+        msg = login_automate(url, options['user'], options['token'], options['ent'])
+      else
+        puts "Please login to your automate instance using 'inspec compliance login http://delivery --user $AUTOMATE_USER--token $DC_TOKEN --ent $AUTOMATE_ENT' "
         exit 1
       end
 
@@ -79,10 +100,8 @@ module Compliance
     def exec(*tests)
       config = Compliance::Configuration.new
       return if !loggedin(config)
-
       # iterate over tests and add compliance scheme
-      tests = tests.map { |t| 'compliance://' + t }
-
+      config['automate'] ? tests = tests.map { |t| config['server'] + t } : tests = tests.map { |t| 'compliance://' + t }
       # execute profile from inspec exec implementation
       diagnose
       run_tests(tests, opts)
@@ -154,7 +173,8 @@ module Compliance
       puts "Start upload to #{owner}/#{profile_name}"
       pname = ERB::Util.url_encode(profile_name)
 
-      puts 'Uploading to Chef Compliance'
+      config['automate'] ? upload_msg = 'Uploading to Chef Automate' : upload_msg = 'Uploading to Chef Compliance'
+      puts upload_msg
       success, msg = Compliance::API.upload(config, owner, pname, archive_path)
 
       if success
@@ -197,6 +217,18 @@ module Compliance
     end
 
     private
+
+    def login_automate(url, user, token, ent)
+      config = Compliance::Configuration.new
+      config['server'] = url
+      config['token'] = token
+      config['ent'] = ent
+      config['automate'] = true
+      config['user'] = user
+      config.store
+      msg = "You have logged into your automate instance: '#{url}' with user: '#{user}' and ent: '#{ent}' "
+      msg
+    end
 
     def login_refreshtoken(url, options)
       success, msg, access_token = Compliance::API.get_token_via_refresh_token(url, options['refresh_token'], options['insecure'])
